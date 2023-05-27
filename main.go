@@ -21,14 +21,13 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"reflect"
 	"strings"
 
 	"github.com/bwmarrin/discordgo"
 	openai "github.com/sashabaranov/go-openai"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-	"gorm.io/driver/sqlite"
-	"gorm.io/gorm"
 )
 
 var (
@@ -53,7 +52,6 @@ func init() {
 	rootCmd.PersistentFlags().String("openai-token", "", "Value of OpenAI API token")
 	rootCmd.PersistentFlags().StringSlice("openai-channels", []string{}, "ChannelID to listen")
 	rootCmd.PersistentFlags().StringSlice("openai-systems", []string{}, "System message processed by ChatGPT")
-	rootCmd.PersistentFlags().String("opts-sqlite", "amabot.sqlite3", "Sqlite3 Database-file to save data")
 
 	// Read configuration file when it exists.
 	cobra.OnInitialize(func() {
@@ -80,29 +78,26 @@ func init() {
 		viper.BindPFlag("token", rootCmd.Flags().Lookup("token"))
 		viper.BindPFlag("openai-token", rootCmd.Flags().Lookup("openai-token"))
 		viper.BindPFlag("openai-systems", rootCmd.Flags().Lookup("openai-systems"))
-		viper.BindPFlag("opts-sqlite", rootCmd.Flags().Lookup("opts-sqlite"))
 	})
 }
 
-type Message struct {
-	gorm.Model
-	Content   string
-	ChannelID string
-	AuthorID  string
+// 配列を逆順にする。
+func reverse(s interface{}) {
+	n := reflect.ValueOf(s).Len()
+	swap := reflect.Swapper(s)
+	for i, j := 0, n-1; i < j; i, j = i+1, j-1 {
+		swap(i, j)
+	}
 }
 
 func main() {
 	rootCmd.Run = func(cmd *cobra.Command, args []string) {
 		// 各APIクライアントのセットアップ
 		discord, err := discordgo.New("Bot " + viper.GetString("token"))
-		openai_client := openai.NewClient(viper.GetString("openai-token"))
-
-		// データベースのセットアップ
-		db, err := gorm.Open(sqlite.Open(viper.GetString("opts-sqlite")), &gorm.Config{})
 		if err != nil {
-			panic("failed to connect database.")
+			panic("failed to setup discord instance.")
 		}
-		db.AutoMigrate(&Message{})
+		openai_client := openai.NewClient(viper.GetString("openai-token"))
 
 		channels := viper.GetStringSlice("openai-channels")
 
@@ -111,14 +106,6 @@ func main() {
 			// 登録したチャンネルの時のみ
 			for _, ch := range channels {
 				if m.ChannelID == ch {
-					// メッセージの保存
-					db.Create(&Message{
-						Content:   m.Content,
-						ChannelID: m.ChannelID,
-						AuthorID:  m.Author.ID,
-					})
-					log.Println("Message created in DB.")
-
 					// ボットの時などは処理しない
 					if m.Author.ID == s.State.User.ID {
 						return
@@ -127,18 +114,21 @@ func main() {
 						return
 					}
 
+					// タイピング
+					s.ChannelTyping(m.ChannelID)
+
 					var chatmsg []openai.ChatCompletionMessage
-					for _, msg := range viper.GetStringSlice("openai-systems") {
-						chatmsg = append(chatmsg, openai.ChatCompletionMessage{
-							Role:    openai.ChatMessageRoleSystem,
-							Content: msg,
-						})
-					}
 					{
-						var lastmsg []*Message
-						db.Model(&Message{}).Where(&Message{ChannelID: m.ChannelID}).Order("created_at DESC").Limit(MESSAGE_LENGTH).Find(&lastmsg)
+						lastmsg, err := discord.ChannelMessages(m.ChannelID, MESSAGE_LENGTH, m.ID, "", "")
+						if err != nil {
+							log.Println("Error:", err)
+							return
+						}
+						reverse(lastmsg)
+						lastmsg = append(lastmsg, m.Message)
+
 						for _, msg := range lastmsg {
-							if msg.AuthorID == s.State.User.ID {
+							if msg.Author.ID == s.State.User.ID {
 								chatmsg = append(chatmsg, openai.ChatCompletionMessage{
 									Role:    openai.ChatMessageRoleAssistant,
 									Content: msg.Content,
@@ -150,9 +140,12 @@ func main() {
 								})
 							}
 						}
-
-						// おそうじ
-						defer db.Model(&Message{}).Where(&Message{ChannelID: m.ChannelID}).Order("created_at DESC").Offset(len(lastmsg)).Delete(&Message{})
+					}
+					for _, msg := range viper.GetStringSlice("openai-systems") {
+						chatmsg = append(chatmsg, openai.ChatCompletionMessage{
+							Role:    openai.ChatMessageRoleSystem,
+							Content: msg,
+						})
 					}
 
 					log.Println("Accessed OpenAI.")
@@ -172,8 +165,6 @@ func main() {
 
 					// ループ抜け出し
 					return
-				} else {
-					go db.Model(&Message{}).Where(&Message{ChannelID: m.ChannelID}).Delete(nil)
 				}
 			}
 		})
