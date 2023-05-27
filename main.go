@@ -41,7 +41,7 @@ var (
 )
 
 const (
-	MESSAGE_LENGTH = 5
+	MESSAGE_LENGTH = 10
 )
 
 func init() {
