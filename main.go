@@ -54,6 +54,7 @@ func init() {
 	rootCmd.PersistentFlags().String("openai-token", "", "Value of OpenAI API token")
 	rootCmd.PersistentFlags().StringSlice("openai-channels", []string{}, "ChannelID to listen")
 	rootCmd.PersistentFlags().StringSlice("openai-systems", []string{}, "System message processed by ChatGPT")
+	rootCmd.PersistentFlags().BoolP("openai-include-assistant", "a", false, "Include assistant's chat.")
 
 	// Read configuration file when it exists.
 	cobra.OnInitialize(func() {
@@ -80,6 +81,7 @@ func init() {
 		viper.BindPFlag("token", rootCmd.Flags().Lookup("token"))
 		viper.BindPFlag("openai-token", rootCmd.Flags().Lookup("openai-token"))
 		viper.BindPFlag("openai-systems", rootCmd.Flags().Lookup("openai-systems"))
+		viper.BindPFlag("openai-include-assistant", rootCmd.Flags().Lookup("openai-include-assistant"))
 	})
 }
 
@@ -138,10 +140,12 @@ func main() {
 						for _, msg := range lastmsg {
 							if msg.Timestamp.Add(MESSAGE_TIMEOUT).After(msg.Timestamp) {
 								if msg.Author.ID == s.State.User.ID {
-									chatmsg = append(chatmsg, openai.ChatCompletionMessage{
-										Role:    openai.ChatMessageRoleAssistant,
-										Content: msg.Content,
-									})
+									if viper.GetBool("openai-include-assistant") {
+										chatmsg = append(chatmsg, openai.ChatCompletionMessage{
+											Role:    openai.ChatMessageRoleAssistant,
+											Content: msg.Content,
+										})
+									}
 								} else {
 									chatmsg = append(chatmsg, openai.ChatCompletionMessage{
 										Role:    openai.ChatMessageRoleUser,
