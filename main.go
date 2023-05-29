@@ -23,6 +23,7 @@ import (
 	"os/signal"
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 	openai "github.com/sashabaranov/go-openai"
@@ -40,7 +41,8 @@ var (
 )
 
 const (
-	MESSAGE_LENGTH = 10
+	MESSAGE_LENGTH  = 6
+	MESSAGE_TIMEOUT = time.Hour * 24
 )
 
 func init() {
@@ -118,6 +120,12 @@ func main() {
 					s.ChannelTyping(m.ChannelID)
 
 					var chatmsg []openai.ChatCompletionMessage
+					for _, msg := range viper.GetStringSlice("openai-systems") {
+						chatmsg = append(chatmsg, openai.ChatCompletionMessage{
+							Role:    openai.ChatMessageRoleSystem,
+							Content: msg,
+						})
+					}
 					{
 						lastmsg, err := discord.ChannelMessages(m.ChannelID, MESSAGE_LENGTH, m.ID, "", "")
 						if err != nil {
@@ -128,24 +136,20 @@ func main() {
 						lastmsg = append(lastmsg, m.Message)
 
 						for _, msg := range lastmsg {
-							if msg.Author.ID == s.State.User.ID {
-								chatmsg = append(chatmsg, openai.ChatCompletionMessage{
-									Role:    openai.ChatMessageRoleAssistant,
-									Content: msg.Content,
-								})
-							} else {
-								chatmsg = append(chatmsg, openai.ChatCompletionMessage{
-									Role:    openai.ChatMessageRoleUser,
-									Content: msg.Content,
-								})
+							if msg.Timestamp.Add(MESSAGE_TIMEOUT).After(msg.Timestamp) {
+								if msg.Author.ID == s.State.User.ID {
+									chatmsg = append(chatmsg, openai.ChatCompletionMessage{
+										Role:    openai.ChatMessageRoleAssistant,
+										Content: msg.Content,
+									})
+								} else {
+									chatmsg = append(chatmsg, openai.ChatCompletionMessage{
+										Role:    openai.ChatMessageRoleUser,
+										Content: msg.Content,
+									})
+								}
 							}
 						}
-					}
-					for _, msg := range viper.GetStringSlice("openai-systems") {
-						chatmsg = append(chatmsg, openai.ChatCompletionMessage{
-							Role:    openai.ChatMessageRoleSystem,
-							Content: msg,
-						})
 					}
 
 					log.Println("Accessed OpenAI.")
