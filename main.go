@@ -41,7 +41,6 @@ var (
 )
 
 const (
-	MESSAGE_LENGTH  = 6
 	MESSAGE_TIMEOUT = time.Hour * 24
 )
 
@@ -55,6 +54,7 @@ func init() {
 	rootCmd.PersistentFlags().StringSlice("openai-channels", []string{}, "ChannelID to listen")
 	rootCmd.PersistentFlags().StringSlice("openai-systems", []string{}, "System message processed by ChatGPT")
 	rootCmd.PersistentFlags().BoolP("openai-include-assistant", "a", false, "Include assistant's chat.")
+	rootCmd.PersistentFlags().IntP("openai-source-chat-length", "c", 5, "Source chat counts.")
 
 	// Read configuration file when it exists.
 	cobra.OnInitialize(func() {
@@ -82,6 +82,7 @@ func init() {
 		viper.BindPFlag("openai-token", rootCmd.Flags().Lookup("openai-token"))
 		viper.BindPFlag("openai-systems", rootCmd.Flags().Lookup("openai-systems"))
 		viper.BindPFlag("openai-include-assistant", rootCmd.Flags().Lookup("openai-include-assistant"))
+		viper.BindPFlag("openai-source-chat-length", rootCmd.Flags().Lookup("openai-source-chat-length"))
 	})
 }
 
@@ -129,7 +130,7 @@ func main() {
 						})
 					}
 					{
-						lastmsg, err := discord.ChannelMessages(m.ChannelID, MESSAGE_LENGTH, m.ID, "", "")
+						lastmsg, err := discord.ChannelMessages(m.ChannelID, viper.GetInt("openai-source-chat-length"), m.ID, "", "")
 						if err != nil {
 							log.Println("Error:", err)
 							return
